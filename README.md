@@ -1,6 +1,7 @@
 # Andy's Tech Blog
 
 ## Articles
+* [Building an OpenShift application from a private Github repo](openshift-build-app-private-repo.md)
 * [Continuous Integration with OpenShift](openshift-ci-part1.md) (series)
 
 
