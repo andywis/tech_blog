@@ -11,7 +11,7 @@ Integration using OpenShift
 Let's start with the skeleton of the Jenkinsfile; this does nothing more
 than build the app.
 
-```yaml
+```groovy
 node {
   def APPNAME = "demo-app"
   
@@ -55,7 +55,7 @@ We can do this with a "selector". The following Jenkinsfile works out the
 name of the pod and calls **openshiftExec**.
 
 
-```yaml
+```groovy
 node {
   stage('build') {
     def APPNAME = "demo-app"

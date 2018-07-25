@@ -186,7 +186,7 @@ pipeline should live in the "dev" project and do the following:
 * Run the tests against the build we've just deployed
 * If the tests pass, promote the build to a different project, by deploying
   it to a different project with something like the following:
-  ```yaml
+  ```groovy
     stage('deploy') {  // TODO: confirm if this is valid
         openshiftDeploy(deploymentConfig: 'my-prod-project')
     }
