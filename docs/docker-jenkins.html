@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    
+    <!-- ===== Inject  magic menu ===== -->
+    <script src="i/index.js"></script>
+
+    <link rel="stylesheet" type="text/css" href="i/work-17.css"/>
+
+    <title>Running Jenkins inside Docker</title>
+</head>
+<body>
+  <div class="content">
+
+
+<h1 id="jenkins">Running Jenkins inside Docker</h1>
+<p>I heard it's possible to run Jenkins in its own container, and give it access to the host's 
+Docker executable, so it can create sibling containers (rather than running child containers in a
+docker-on-docker situation)</p>
+
+<p>The trick is to mount the docker.sock file and the docker binary, so the Jenkins container is
+using the same executable to spawn containers. We also need to align users and groups between 
+the host and the container.</p>
+
+
+
+
+
+<div style="float:left">
+
+  <div style="max-width:700px">
+  <h2>Updated</h2>
+  <p>In the original implementation, the docker socket <b>and</b> the docker binary were mounted
+  into the Jenkins container with "-v", but this led to shared library issues in certain versions
+  of Jenkins. I've updated these instructions
+  now that I've changed the approach to install the binary in the jenkins container</p>
+  </div>
+</div>
+
+<div style="clear:both"></div><!-- CLEAR FLOATS FOR SIDEBAR -->
+
+
+
+<h2>Add group to the Jenkins image</h2>
+
+<p>I created a custom <code>Dockerfile</code> that configures the Jenkins user to be a member of the 
+docker group and installs docker, (other dependencies are mentioned in the 'issues' section towards the
+end of this article):
+<!-- UPDATE: 
+     Added apt-get install line 
+     Removed groupadd command:
+        RUN groupadd -g 999 docker
+-->
+<pre>
+FROM jenkinsci/jenkins:2.60.1
+USER root
+RUN apt-get update &amp;&amp; apt-get install -y docker.io
+RUN usermod -a -G docker jenkins
+USER jenkins
+</pre>
+<ul>
+    <li>jenkinsci/* is the official package on docker hub. The top level one isn't used.</li>
+    <!--I encountered shared library errors with Jenkins 2.61 when I was trying to volume-mount the
+        'docker' binary, and downgraded to v2.50. The shared library errors were probably caused by 
+        the container being built against a different kernel. The correct fix was to apt-get install
+        the docker binary into the container.-->
+    <li>The custom image is then created with <tt>docker build -t jenkins2-img .</tt></li>
+
+</ul>
+</p>
+
+
+
+<h2>Create a data volume</h2>
+<p>Jenkins data needs to persist over a reboot of the Jenkins-master container.
+To overcome the problem of ephemeral storage in Docker, create a "data container" that 
+will store the filing system used by Jenkins.
+<pre>
+# Dockerfile-data
+FROM debian:jessie
+RUN useradd -d "/var/jenkins_home" -u 1000 -m -s /bin/bash jenkins
+RUN mkdir -p /var/log/jenkins
+RUN chown -R jenkins:jenkins /var/log/jenkins
+VOLUME ["/var/log/jenkins", "/var/jenkins_home"]
+USER jenkins
+CMD ["echo", "Data container for Jenkins"]
+</pre>
+</p>
+<p>Build the data container with <tt>docker build -t jenkins2-data -f Dockerfile-data .</tt>
+</p>
+<p>This will be attached to the Jenkins container with the argument <tt>--volumes-from=jenkins2-data</tt></p>
+
+
+
+<h2>Run the container(s)</h2>
+<p>I tried to use <tt>docker-compose</tt> to launch the containers, but it doesn't appear to have all
+the options I need (the latest version may be closer!). In particular, I need to specify a user and
+group to run the container as.</p>
+<p>In the following script, we launch the data container, if it hasn't already been launched. It will 
+terminate straight away, but the volumes are still available for use
+</p>
+<p>Then, launch the Jenkins container, mounting the data container and the docker.sock file 
+<!--and the docker executable itself-->.</p>
+<pre>
+#!/bin/bash
+if [ -z "$(docker ps -a | grep jenkins2-data)" ]; then
+    echo "Launching Jenkins-Data container"
+    docker run --name=jenkins2-data jenkins2-data
+else
+    echo "Jenkins-Data container is ready"
+fi
+
+echo "Lauching Jenkins app"
+cwd=$(pwd)
+GROUP_ID=$(grep docker /etc/group | cut -d: -f3)
+docker run -u jenkins:${GROUP_ID} \
+  --volumes-from=jenkins2-data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  <!-- -v /usr/bin/docker:/usr/bin/docker \ 
+  -->      -p 8082:8080 \
+        -p 50000:50000 \
+        --name jenkins2-master \
+        -d \
+        jenkins2-img \
+
+echo "You can find the initial 'admin' password with:"
+echo "  docker exec jenkins2-master cat /var/jenkins_home/secrets/initialAdminPassword"
+
+echo "To stop, use: "
+echo "  docker stop jenkins2-master; docker rm jenkins2-master"
+</pre>
+<p>
+  <b>Note</b> that I've chosen to expose the Jenkins web interface on port 8082.
+</p>
+<p>
+  You can now point your browser at Jenkins and perform the initial setup (for which you
+  will need the admin password hinted at in the script above)
+</p>
+
+
+
+<h2>Testing it</h2>
+<p>
+    We're going to run a really simple container to prove it works. My personal favourite test image 
+    is "tutum/hello-world". It's a very simple container that runs nginx with a single PHP page showing 
+    the container's hostname. We can test our Docker-Jenkins installation with it.
+</p>
+<p>
+    <b>First</b>, make sure this image is NOT present on the host with the <code>docker ps -a ...</code> and
+    <code>docker rmi ...</code> commands.
+</p>
+<p>
+    <b>Second</b>, create a Jenkins job to run the container: (wording from
+    <a href="http://container-solutions.com/running-docker-in-jenkins-in-docker/">here</a>)
+    <ul>
+        <li>Open the Jenkins home page (http://localhost:8082/) in a browser and click the “create new jobs” link.</li>
+        <li>Enter the item name (“docker-test-001”), select “Freestyle project” and click OK.</li>
+        <li>On the configuration page, click “Add build step” then “Execute shell”.</li>
+        <li>In the command box enter “docker run -d -p 8081:80 tutum/hello-world”</li>
+        <li>Click “Save”.</li>
+        <li>Click “Build Now”.</li>
+    </ul> 
+</p>
+<p>
+    Now if you look on the HOST (<code>docker ps </code>), you'll see the "tutum/hello-world" container is running
+    as well as the jenkins2-master
+</p>
+<p>
+    To prove the Jenkins data persists, shut down and restart the "jenkins2-master" container from the host.
+    You will see your test job and results are still there.
+</p>
+
+
+<h2>Issues</h2>
+<ul>
+  <li>
+      I had to downgrade Jenkins to 2.50 to get docker-on-docker to work. 2.60.1 gave me errors when
+      I tried to "docker run...". e.g. <tt>"libltdl.so.7: cannot open shared object file" error:</tt>
+      I think this is addressed 
+      <a href="http://jpetazzo.github.io/2015/09/03/do-not-use-docker-in-docker-for-ci/">here</a> (see the 
+      end of the article); You still share the socket, but install your own docker executable inside
+      the jenkins image. It also suggests that using the Docker API might be a suitable alternative.
+      <br>
+      This was indeed the case. The article above has been updated, and I was able to upgrade Jenkins again.
+  </li>
+  <li>
+      I tried the Alpine Linux version, but ran into problems creating the user in the Dockerfile in
+      Alpine/Busybox.
+  </li>
+  <li>
+      Because I was using an older version of Jenkins, I had to manually install older versions of the
+      plugins. When I eventually worked out the dependency order, I was able to start with the modules that
+      had no dependencies, and gradually install the rest
+  </li>
+  <li>
+      To add virtualenv to the Jenkins master, I added the following RUN command to the Dockerfile:<br>
+      <tt>RUN apt-get update &amp;&amp; apt-get install -y python-virtualenv</tt>
+  </li>
+  <li>
+      Jenkins needs lots of things installed. e.g. "pip install lxml" needed libxslt and cc
+  </li>
+  <li>
+      compiling lxml in your "pip install" step takes time. Consider apt-get install python-lxml in the Dockerfile
+      to speed things up
+  </li>
+</ul>
+
+<h2>Resources</h2>
+<ul>
+  <li><a href="http://container-solutions.com/running-docker-in-jenkins-in-docker/">http://container-solutions.com/running-docker-in-jenkins-in-docker/</a>
+      Instructions for running Docker in Jenkins (1.5) in Docker  (mounting the docker.sock and /usr/bin/docker</li>
+  <li><a href="https://www.cloudbees.com/blog/get-started-jenkins-20-docker">https://www.cloudbees.com/blog/get-started-jenkins-20-docker</a>
+      Jenkins 2.0 with Docker. Includes instructions on configuring a data container. <b>Worth reading</b></li>
+  <li><a href="https://killerspaz.wordpress.com/2017/03/30/docker-outside-of-docker/">https://killerspaz.wordpress.com/2017/03/30/docker-outside-of-docker/</a> 
+      Suggestions for overcoming the shared object file error (didn't work for me)</li>
+  <li><a href="https://youtu.be/38SAyBLSHUM">https://youtu.be/38SAyBLSHUM</a> conference talk on Jenkins and Docker, proposing use of Busybox for the data container</li>
+  <li>Some security concerns about exposing the Docker socket can be found
+      <a href="https://www.lvh.io/posts/dont-expose-the-docker-socket-not-even-to-a-container.html">here</a>,
+      <a href="https://raesene.github.io/blog/2016/03/06/The-Dangers-Of-Docker.sock/">here</a>,
+      <a href="https://github.com/jpetazzo/dind">here</a>
+      and <a href="http://jpetazzo.github.io/2015/09/03/do-not-use-docker-in-docker-for-ci/">here</a>
+</ul>
+
+<h2>Next Steps</h2>
+<ul>
+    <li>Experiment with pipelines</li>
+    <li>Experiment with the Jenkins API to be able to completely configure Jenkins</li>
+</ul>
+
+
+  </div><!-- /div.content -->
+</body></html>
