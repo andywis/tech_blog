@@ -13,6 +13,12 @@ at least one *testing* environment and a *production* environment which is the
 
 In the world of Openshift, each environment can be represented using a project.
 
+### Series Contents
+* [Setting up the Project and Pipeline](openshift-ci-part1.md) (this page)
+* [Running tests in the application container](openshift-ci-part2.md)
+* Running tests in the Jenkins Slave Node (TODO)
+* Promoting builds to higher environments (TODO)
+* A Worked example (TODO)
 
 ## Setting up the Project and Application
 We'll start by creating a really simple web application in Python
@@ -200,18 +206,20 @@ app to "dev", run the unit tests, and detect whether the tests pass or fail.
 
 We could run the unit tests in two ways:
 1. Deploy the container, "docker exec" into it and run the unit tests there
+   discussed in [part 2](openshift-ci-part2.md)
 2. Build and deploy a separate container that contains the code and the
-   dependencies, and run the unit tests there.
+   dependencies, and run the unit tests there. We'll discuss this in
+   [part 3](openshift-ci-part3.md)
    
-We will cover both here...
 
-See [part 2](Part02_UnitTests1.md) where we discuss the "docker exec" option.
+
 
 # TODO
 * The correct way to pause a pipeline, e.g. to wait until manual testing has 
   completed.
-* Update UnitTests1.md with the correct way to detect a broken exec.
+* Update openshift-ci-part2.md with the correct way to detect a broken exec.
 * Ensure I've adequetely described how to promote a build
+* research more about the purpose of withCluster and withProject
 
 ## Further reading
 

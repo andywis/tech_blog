@@ -1,7 +1,7 @@
 # Andy's Tech Blog
 
 ## Articles
-* [Continuous Integration with OpenShift](openshift-ci-part1.md)
+* [Continuous Integration with OpenShift](openshift-ci-part1.md) (series)
 
 
 ## About
